@@ -12,12 +12,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class RicartAgrawalaSockets {
+public class Sockets {
     private static final int PORT = 12345;
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, InterruptedException {
         if (args.length != 2) {
-            System.err.println("Koristi: java RicartAgrawalaSockets <brojProcesa> <trenutniProcesID>");
+            System.err.println("Koristi: java Sockets <brojProcesa> <trenutniProcesID>");
             System.exit(1);
         }
 
@@ -51,7 +51,7 @@ public class RicartAgrawalaSockets {
 
                         buffer.clear();
                         buffer.putInt(trenutniProcesID);
-                        buffer.put(proces.odgovori.get(procesId) ? (byte) 1 : (byte) 0);
+                        buffer.put(proces.getOdgovor(procesId) ? (byte) 1 : (byte) 0);
                         buffer.flip();
 
                         socket.write(buffer, null, new CompletionHandler<Integer, Void>() {
@@ -85,8 +85,8 @@ public class RicartAgrawalaSockets {
         });
 
         // Komunikacija s drugim procesima
-        proces.uđiUKritičniOdsjek();
-        int broj = proces.brojZahtjeva.get();
+        proces.udiUKriticniOdsjek();
+        int broj = proces.getBrojZahtjeva();
 
         AtomicInteger brojOdgovora = new AtomicInteger();
         for (int i = 0; i < brojProcesa; i++) {
@@ -145,7 +145,9 @@ public class RicartAgrawalaSockets {
         // Čekanje na sve odgovore
         while (brojOdgovora.get() < brojProcesa - 1) {
             try {
-                Thread.sleep(100);
+// Čekanje na sve odgovore
+                proces.getDozvolaUlaska().await();
+
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -162,7 +164,7 @@ public class RicartAgrawalaSockets {
 
         // Izlazak iz kritičnog odsjeka
         System.out.println("Proces " + trenutniProcesID + " izlazi iz kritičnog odsjeka.");
-        proces.izađiIzKritičnogOdsjeka();
+        proces.izadiIzKriticnogOdsjeka();
 
         // Zatvaranje izvršitelja i oslobađanje resursa
         executor.shutdown();

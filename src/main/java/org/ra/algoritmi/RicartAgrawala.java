@@ -1,8 +1,9 @@
-package org.ra.algoritam;
+package org.ra.algoritmi;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 
 public class RicartAgrawala {
     private final int id;
@@ -10,6 +11,19 @@ public class RicartAgrawala {
     private final ConcurrentHashMap<Integer, Boolean> odgovori;
     private final ConcurrentLinkedQueue<Integer> zahtjeviRed;
     private volatile boolean ulazakUkritičniOdsjek;
+    private volatile CountDownLatch dozvolaUlaska;
+
+    public boolean getOdgovor(int procesId) {
+        return odgovori.get(procesId);
+    }
+
+    public int getBrojZahtjeva() {
+        return brojZahtjeva.get();
+    }
+
+    public CountDownLatch getDozvolaUlaska() {
+        return dozvolaUlaska;
+    }
 
     public RicartAgrawala(int id, int brojProcesa) {
         this.id = id;
@@ -17,6 +31,7 @@ public class RicartAgrawala {
         this.odgovori = new ConcurrentHashMap<>();
         this.zahtjeviRed = new ConcurrentLinkedQueue<>();
         this.ulazakUkritičniOdsjek = false;
+        this.dozvolaUlaska = new CountDownLatch(brojProcesa - 1);
 
         for (int i = 0; i < brojProcesa; i++) {
             if (i != id) {
@@ -40,32 +55,24 @@ public class RicartAgrawala {
         }
     }
 
-    public void primiOdgovor(int procesId) {
-        odgovori.put(procesId, true);
+    public void primiOdgovor(int procesId, boolean odgovor) {
+        if (odgovor) {
+            odgovori.put(procesId, true);
+            dozvolaUlaska.countDown();
+        }
     }
 
-    public void uđiUKritičniOdsjek() {
+    public void udiUKriticniOdsjek() throws InterruptedException {
         int broj = brojZahtjeva.incrementAndGet();
         for (Integer procesId : odgovori.keySet()) {
             posaljiZahtjev(procesId);
         }
 
-        while (true) {
-            boolean dozvola = true;
-            for (Boolean odgovor : odgovori.values()) {
-                if (!odgovor) {
-                    dozvola = false;
-                    break;
-                }
-            }
-            if (dozvola) {
-                ulazakUkritičniOdsjek = true;
-                break;
-            }
-        }
+        dozvolaUlaska.await();
+        ulazakUkritičniOdsjek = true;
     }
 
-    public void izađiIzKritičnogOdsjeka() {
+    public void izadiIzKriticnogOdsjeka() {
         ulazakUkritičniOdsjek = false;
         brojZahtjeva.set(Integer.MAX_VALUE);
 
@@ -73,8 +80,14 @@ public class RicartAgrawala {
             int procesId = zahtjeviRed.poll();
             primiZahtjev(procesId, brojZahtjeva.get());
         }
+
+        // Resetiraj CountDownLatch za sljedeći ulazak u kritični odsjek
+        resetirajDozvolaUlaska();
     }
 
+    private void resetirajDozvolaUlaska() {
+        dozvolaUlaska = new CountDownLatch(odgovori.size());
+    }
     public boolean isUlazakUkritičniOdsjek() {
         return ulazakUkritičniOdsjek;
     }
