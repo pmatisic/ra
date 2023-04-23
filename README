@@ -9,4 +9,4 @@ Pokretanje servera: ./pokreniServer.sh <broj procesa> <id servera>
 Pokretanje klijenta (ili više klijenata): ./pokreniKlijent.sh <broj procesa> <id klijenta>
 Slijedite upute dobivene ispisom na komandnoj liniji.
 
-MIT Licence 2023.
+MIT License 2023.
