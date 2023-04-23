@@ -40,7 +40,7 @@ public class Klijent {
       switch (komanda) {
 
         case "povezi":
-          System.out.println("Unesi ID procesa za povezivanje:");
+          System.out.println("Unesi ID serverskog procesa za povezivanje:");
           int procesId = scanner.nextInt();
           scanner.nextLine();
           brojZahtjeva++;
