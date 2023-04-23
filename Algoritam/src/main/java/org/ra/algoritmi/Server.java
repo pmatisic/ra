@@ -1,17 +1,13 @@
 package org.ra.algoritmi;
 
 import java.io.IOException;
-import java.net.BindException;
-import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.channels.AsynchronousCloseException;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.Iterator;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -20,9 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class Server {
   private final int id;
   private final AtomicInteger brojZahtjeva;
-  private final ConcurrentHashMap<Integer, Boolean> odgovori;
   private final ConcurrentLinkedQueue<Integer> zahtjeviRed;
-  private volatile boolean ulazakUKriticniOdsjek;
   private volatile CountDownLatch dozvolaUlaska;
   private static final int PORT = 12345;
   private final int brojProcesa;
@@ -31,16 +25,15 @@ public class Server {
     this.id = id;
     this.brojProcesa = brojProcesa;
     this.brojZahtjeva = new AtomicInteger();
-    this.odgovori = new ConcurrentHashMap<>();
     this.zahtjeviRed = new ConcurrentLinkedQueue<>();
-    this.ulazakUKriticniOdsjek = false;
   }
 
-  public void posaljiZahtjev(int procesId, int posiljateljId) {
+  public void posaljiZahtjev(int procesId, int brojZahtjeva) {
     try (SocketChannel socket = poveziSe(procesId)) {
-      ByteBuffer buffer = ByteBuffer.allocate(8);
-      buffer.putInt(posiljateljId);
-      buffer.putInt(brojZahtjeva.get());
+      ByteBuffer buffer = ByteBuffer.allocate(9);
+      buffer.put((byte) 0);
+      buffer.putInt(id);
+      buffer.putInt(brojZahtjeva);
       buffer.flip();
       socket.write(buffer);
     } catch (IOException e) {
@@ -55,114 +48,113 @@ public class Server {
       try {
         socket.connect(adresa);
         break;
-      } catch (ConnectException e) {
+      } catch (IOException e) {
         try {
           Thread.sleep(1000);
         } catch (InterruptedException ex) {
           ex.printStackTrace();
         }
-      } catch (AsynchronousCloseException e) {
-        System.err.println(
-            "AsynchronousCloseException se dogodio pri uspostavljanju veze s procesom " + procesId);
-        throw e;
       }
     }
     return socket;
   }
 
   public void udiUKriticniOdsjek() {
-    brojZahtjeva.incrementAndGet();
+    int trenutniBrojZahtjeva = brojZahtjeva.incrementAndGet();
     zahtjeviRed.add(id);
     while (true) {
-      ulazakUKriticniOdsjek = true;
       dozvolaUlaska = new CountDownLatch(1);
       for (int i = 0; i < brojProcesa; i++) {
         if (i == id) {
           continue;
         }
-        try (SocketChannel socket = poveziSe(i)) {
-          ByteBuffer buffer = ByteBuffer.allocate(8);
-          buffer.putInt(id);
-          buffer.putInt(brojZahtjeva.get());
-          buffer.flip();
-          socket.write(buffer);
-        } catch (IOException e) {
-          System.err.println("Povezivanje s procesom " + i + " nije uspjelo.");
-          continue;
-        }
+        posaljiZahtjev(i, trenutniBrojZahtjeva);
       }
       try {
         dozvolaUlaska.await(100, TimeUnit.MILLISECONDS);
+        System.out.println("Proces " + id + " ušao je u kritični odsjek.");
         break;
       } catch (InterruptedException e) {
-        System.out.println("Proces " + id + " ceka na ulazak u kritični odsjek...");
+        System.out.println("Proces " + id + " čeka na ulazak u kritični odsjek...");
       }
     }
   }
 
-  public synchronized void izadiIzKriticnogOdsjeka(int id) {
+  public void izadiIzKriticnogOdsjeka() {
+    System.out.println("Izlazak iz kritičnog odsjeka započeo je.");
     try {
       if (Thread.currentThread().isInterrupted()) {
+        System.out.println("Dretva je prekinuta.");
         return;
       }
-      ulazakUKriticniOdsjek = false;
       brojZahtjeva.incrementAndGet();
+      System.out.println("Broj zahtjeva inkrementiran je.");
+      if (dozvolaUlaska == null) {
+        dozvolaUlaska = new CountDownLatch(1);
+      }
       dozvolaUlaska.countDown();
+      System.out.println("Dozvola za ulazak odbrojana je.");
       Iterator<Integer> iterator = zahtjeviRed.iterator();
       if (iterator.hasNext()) {
         int procesId = iterator.next();
+        System.out.println("Proces ID za sljedeći zahtjev: " + procesId);
+        System.out.println("Pokušavam poslati odgovor procesu " + procesId);
         posaljiOdgovor(procesId, true);
+        System.out.println("Proces " + id + " izašao je iz kritičnog odsjeka.");
         iterator.remove();
+      } else {
+        System.out.println("Nema sljedećih zahtjeva u redu.");
+      }
+      for (Integer procesId : zahtjeviRed) {
+        posaljiOdgovor(procesId, true);
       }
     } catch (Exception e) {
       e.printStackTrace();
     }
   }
 
-  public void primiZahtjev(int procesId, int brojZahtjevaProcesa) {
-    if ((brojZahtjevaProcesa < brojZahtjeva.get())
-        || (brojZahtjevaProcesa == brojZahtjeva.get() && procesId < id)) {
-      odgovori.put(procesId, true);
-      posaljiOdgovor(procesId, true);
-    } else {
-      zahtjeviRed.add(procesId);
-      System.out.println("Proces " + id + " dodao zahtjev procesa " + procesId + " u red.");
+  public void primiZahtjev(int messageType, int procesId, int brojZahtjevaProcesa) {
+    if (messageType == 0) {
+      if ((brojZahtjevaProcesa < brojZahtjeva.get())
+          || (brojZahtjevaProcesa == brojZahtjeva.get() && procesId < id)) {
+        posaljiOdgovor(procesId, true);
+      } else {
+        zahtjeviRed.add(procesId);
+        System.out.println("Proces " + id + " dodao zahtjev procesa " + procesId + " u red.");
+      }
     }
-  }
-
-  public void prekini() {
-    Thread.currentThread().interrupt();
   }
 
   public void posaljiOdgovor(int procesId, boolean odgovor) {
     try (SocketChannel socket = poveziSe(procesId)) {
-      ByteBuffer buffer = ByteBuffer.allocate(5);
+      System.out.println("Povezan sa procesom " + procesId);
+      ByteBuffer buffer = ByteBuffer.allocate(6);
+      buffer.put((byte) 1);
       buffer.putInt(id);
       buffer.put(odgovor ? (byte) 1 : (byte) 0);
       buffer.flip();
+      System.out.println("Šaljem odgovor:");
+      System.out.println("Proces ID: " + procesId);
+      System.out.println("Odgovor: " + odgovor);
       socket.write(buffer);
+      socket.shutdownOutput();
     } catch (IOException e) {
       e.printStackTrace();
     }
   }
 
-  public void primiOdgovor(int procesId, boolean odgovor) {
-    if (odgovor) {
-      odgovori.put(procesId, true);
-      dozvolaUlaska.countDown();
+  public void primiOdgovor(int messageType, int procesId, boolean odgovor) {
+    if (messageType == 1) {
+      if (odgovor) {
+        dozvolaUlaska.countDown();
+      }
     }
   }
 
   public void pokreniServer() throws IOException {
     ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
     serverSocketChannel.configureBlocking(false);
-    try {
-      serverSocketChannel.socket().bind(new InetSocketAddress(PORT + id));
-    } catch (BindException e) {
-      System.err.println("Port " + (PORT + id)
-          + " je već zauzet. Zatvorite sve pokrenute instance i pokrenite ih ponovno.");
-      System.exit(1);
-    }
+    serverSocketChannel.socket().bind(new InetSocketAddress(PORT + id));
     Selector selector = Selector.open();
     serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
     try {
@@ -182,49 +174,38 @@ public class Server {
             client.register(selector, SelectionKey.OP_READ);
           } else if (key.isReadable()) {
             SocketChannel client = (SocketChannel) key.channel();
-            ByteBuffer buffer = ByteBuffer.allocate(13);
+            ByteBuffer buffer = ByteBuffer.allocate(14);
             int bytesRead = client.read(buffer);
             if (bytesRead == -1) {
               client.close();
             } else if (bytesRead > 0) {
               buffer.flip();
-              while (buffer.remaining() >= 8) {
-                int procesId = buffer.getInt();
-                int brojZahtjevaProcesa = buffer.getInt();
-                primiZahtjev(procesId, brojZahtjevaProcesa);
-                System.out.println("Proces " + id + " primio zahtjev od procesa " + procesId);
-                buffer.compact().flip();
-              }
-              buffer.compact();
-              buffer.flip();
-              while (buffer.remaining() >= 5) {
-                int procesId = buffer.getInt();
-                byte odgovorByte = buffer.get();
-                primiOdgovor(procesId, odgovorByte == 1);
-                System.out.println("Proces " + id + " primio odgovor od procesa " + procesId);
-                buffer.compact().flip();
+              while (buffer.hasRemaining()) {
+                byte messageType = buffer.get();
+                System.out.println("Primljena poruka:");
+                System.out.println("Vrsta poruke: " + messageType);
+                if (messageType == 0 && buffer.remaining() >= 8) {
+                  int procesId = buffer.getInt();
+                  int brojZahtjevaProcesa = buffer.getInt();
+                  primiZahtjev(messageType, procesId, brojZahtjevaProcesa);
+                  System.out.println("Proces " + id + " primio zahtjev od procesa " + procesId);
+                } else if (messageType == 1 && buffer.remaining() >= 5) {
+                  int procesId = buffer.getInt();
+                  byte odgovorByte = buffer.get();
+                  System.out.println("Proces ID: " + procesId);
+                  System.out.println("Odgovor: " + (odgovorByte == 1));
+                  primiOdgovor(messageType, procesId, odgovorByte == 1);
+                  System.out.println("Proces " + id + " primio odgovor od procesa " + procesId);
+                } else {
+                  break;
+                }
               }
             }
           }
         }
-        if (ulazakUKriticniOdsjek) {
-          System.out.println("Proces " + id + " je u kritičnom odsjeku");
-          try {
-            Thread.sleep(500);
-          } catch (InterruptedException e) {
-            e.printStackTrace();
-          }
-          System.out.println("Proces " + id + " izlazi iz kritičnog odsjeka");
-          ulazakUKriticniOdsjek = false;
-          dozvolaUlaska.countDown();
-          for (Integer procesId : zahtjeviRed) {
-            posaljiOdgovor(procesId, true);
-          }
-          zahtjeviRed.clear();
-        }
       }
     } catch (IOException e) {
-      System.err.println("Iznimka kod prijema zahtjeva ili slanja odgovora:");
+      System.err.println("Iznimka kod prijema zahtjeva ili slanja od odgovora:");
       e.printStackTrace();
     } finally {
       serverSocketChannel.close();
@@ -240,6 +221,7 @@ public class Server {
     int trenutniProces = Integer.parseInt(args[0]);
     int brojProcesa = Integer.parseInt(args[1]);
     Server server = new Server(trenutniProces, brojProcesa);
+
     try {
       server.pokreniServer();
     } catch (IOException e) {
