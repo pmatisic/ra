@@ -1,12 +1,12 @@
 #!/bin/bash
 
 if [ "$#" -ne 2 ]; then
-    echo "Korištenje: ./pokreniServer.sh <broj_procesa> <ID_procesa>"
+    echo "Korištenje: ./pokreniServer.sh <broj_procesa> <ID_servera>"
     exit 1
 fi
 
 broj_procesa="$1"
-ID_procesa="$2"
+ID_servera="$2"
 
 # JAR datoteka koja sadrži aplikaciju
 jar_file="target/ra-1.0.0.jar"
@@ -21,4 +21,4 @@ if [ ! -f "$jar_file" ]; then
 fi
 
 # Pokreni server s odgovarajućim ID-om i brojem procesa
-java -cp "$jar_file" "$server_class" $ID_procesa $broj_procesa
+java -cp "$jar_file" "$server_class" $ID_servera $broj_procesa

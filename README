@@ -1,1 +1,12 @@
-u izradi
+Ricart-Agrawala algoritam
+
+-Upute za korištenje-
+
+Preduvjeti za korištenje: jdk, maven
+Kompilacija projekta: make
+Prava za izvršavanje: chmod +x *.sh (skripte se nalaze u root direktoriju)
+Pokretanje servera: ./pokreniServer.sh <broj procesa> <id servera>
+Pokretanje klijenta (ili više klijenata): ./pokreniKlijent.sh <broj procesa> <id klijenta>
+Slijedite upute dobivene ispisom na komandnoj liniji.
+
+MIT Licence 2023.
